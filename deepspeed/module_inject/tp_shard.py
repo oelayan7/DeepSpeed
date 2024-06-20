@@ -4,6 +4,7 @@
 # DeepSpeed Team
 
 from deepspeed import comm as dist
+from deepspeed import get_accelerator
 global num_kv_heads
 
 
@@ -36,16 +37,18 @@ def get_shard_size(total_size, mp_size, name=None, rank=None):
     global num_kv_heads
     last_linear = ["lm_head", "embed_out"]
     # When we have num_kv_heads defined, uneven division is possible, otherwise enforce near even division
-    if rank == None:
+    if rank is None:
         rank = dist.get_rank()
-    if num_kv_heads != None and total_size % num_kv_heads == 0 and "mlp" not in str(name) and str(
+    if num_kv_heads is not None and total_size % num_kv_heads == 0 and "mlp" not in str(name) and str(
             name) not in last_linear:
         my_slices = (num_kv_heads // mp_size) + (1 if rank < (num_kv_heads % mp_size) else 0)
         return total_size * my_slices // num_kv_heads
     else:
-        if total_size >= 64:
-            grain_size = total_size // 64
-            return (grain_size // mp_size + (1 if rank < (grain_size % mp_size) else 0)) * 64
+        grain_size_divisors_map = {'hpu': get_num_kv_heads()}
+        grain_size_divisor = grain_size_divisors_map.get(get_accelerator().device_name(), 64)
+        if total_size >= grain_size_divisor:
+            grain_size = total_size // grain_size_divisor
+            return (grain_size // mp_size + (1 if rank < (grain_size % mp_size) else 0)) * grain_size_divisor
         else:
             return total_size // mp_size + (1 if rank < (total_size % mp_size) else 0)
 
